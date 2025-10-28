@@ -1,0 +1,191 @@
+---------1) Data Profile: how many rows, unique VINs, and date range-----------------
+
+SELECT
+  COUNT(*) AS total_rows,
+  COUNT(DISTINCT vin)                       AS unique_vins,
+  MIN(saledate)                             AS first_sale,
+  MAX(saledate)                             AS last_sale
+FROM car_data;
+
+-------------------------------------------------------------------------------------
+------- 2) Duplicate check: VINs listed multiple times (possible relists)------------
+SELECT vin, 
+COUNT(*) AS listings
+FROM car_data
+GROUP BY vin
+HAVING COUNT(*) > 1
+ORDER BY listings DESC, vin;
+------------------------------------------------------------------------------------
+------3) Keep only the last listing for each VIN-----------------------------------
+SELECT *
+FROM (
+   SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY vin ORDER BY saledate DESC) AS rn
+   FROM car_data c
+) t
+WHERE rn > 1;
+---------------------------------------------------------------------------------
+--------  4) Missingness scan: count NULLs per important column-----------------
+SELECT 'trim' AS column_name, COUNT(*) AS null_count
+FROM car_data
+WHERE trim IS NULL
+
+UNION ALL
+SELECT 'odometer', COUNT(*)
+FROM car_data
+WHERE odometer IS NULL
+
+UNION ALL
+SELECT 'color', COUNT(*)
+FROM car_data
+WHERE color IS NULL
+
+UNION ALL
+SELECT 'mmr', COUNT(*)
+FROM car_data
+WHERE mmr IS NULL
+
+UNION ALL
+SELECT 'sellingprice', COUNT(*)
+FROM car_data
+WHERE sellingprice IS NULL
+
+UNION ALL
+SELECT 'saledate', COUNT(*)
+FROM car_data
+WHERE saledate IS NULL;
+------------------------------------------------------------------------------------------
+--------- 5) Core KPI snapshot (overall) Average price, mileage, and market delta vs MMR--
+SELECT
+  ROUND(AVG(sellingprice ))                      AS avg_price,
+  ROUND(AVG(odometer))                         AS avg_mileage,
+  ROUND(AVG(sellingprice - mmr))                AS avg_above_mmr,
+  ROUND(AVG((sellingprice - mmr) / NULLIF(mmr,0))) AS avg_pct_above_mmr
+FROM car_data
+WHERE sellingprice IS NOT NULL AND mmr IS NOT NULL;
+------------------------------------------------------------------------------------------
+----6)Top 10 makes by revenue and price premium vs MMR---------------------------------
+SELECT
+  make,
+  COUNT(*)                                   AS cars_sold,
+  ROUND(SUM(sellingprice))       AS total_revenue,
+  ROUND(AVG(sellingprice - mmr)) AS avg_above_mmr
+FROM car_data
+WHERE sellingprice IS NOT NULL
+GROUP BY make
+ORDER BY total_revenue DESC
+LIMIT 10;
+------------------------------------------------------------------------------------------
+-------- 7) Best-performing models by % above MMR (min 20 sales to avoid noise)----------
+SELECT
+  make, model,
+  COUNT(*)                                                   AS cars_sold,
+  AVG((sellingprice - mmr) / NULLIF(mmr,0)) AS avg_pct_above_mmr
+FROM car_data
+WHERE sellingprice IS NOT NULL AND mmr IS NOT NULL
+GROUP BY make, model
+HAVING COUNT(*) >= 20
+ORDER BY avg_pct_above_mmr DESC
+LIMIT 15;
+------------------------------------------------------------------------------------
+----- 8) Transmission impact (automatic vs manual vs other)----------------------
+SELECT
+  transmission,
+  COUNT(*)                                   AS cars,
+  AVG(sellingprice)     AS avg_price,
+  AVG(sellingprice - mmr) AS avg_above_mmr
+FROM car_data
+WHERE transmission IS NOT NULL AND sellingprice IS NOT NULL AND mmr IS NOT NULL
+GROUP BY transmission
+ORDER BY cars DESC;
+----------------------------------------------------------------------------------
+---- 9) Seller performance: consistency vs MMR (min 30 sales)-------------------
+SELECT
+seller,
+COUNT(*) AS cars_sold,
+AVG(sellingprice - mmr) AS avg_above_mmr
+from car_data
+ 
+WHERE sellingprice IS NOT NULL AND mmr IS NOT NULL AND seller IS NOT NULL
+GROUP BY seller
+HAVING COUNT(*) >= 30
+ORDER BY avg_above_mmr DESC
+LIMIT 20;
+---------------------------------------------------------------------------------------
+-------- 10) State profitability map: average % above MMR by state---------------------
+SELECT
+UPPER(state)                                                AS state,
+COUNT(*)                                                    AS cars_sold,
+AVG((sellingprice - mmr) / NULLIF(mmr,0)) AS avg_pct_above_mmr
+FROM car_data
+WHERE state IS NOT NULL AND sellingprice IS NOT NULL AND mmr IS NOT NULL
+GROUP BY state
+HAVING COUNT(*) >= 50
+ORDER BY avg_pct_above_mmr DESC;
+---------------------------------------------------------------------------------------
+------- 11) onthly trend: volume and average price (time series)-----------------------
+WITH c AS (
+  SELECT STR_TO_DATE(
+           REGEXP_REPLACE(saledate, ' GMT.*$', ''),  -- remove timezone tail
+           '%a %b %e %Y %H:%i:%s'
+         ) AS dt,
+         sellingprice
+  FROM car_data
+  WHERE saledate IS NOT NULL AND sellingprice IS NOT NULL
+)
+SELECT DATE_FORMAT(dt, '%Y-%m') AS month,
+       COUNT(*) AS cars_sold,
+       ROUND(sum(sellingprice)) AS total
+FROM c
+WHERE dt >= '2015-01-01' AND dt < '2016-01-01'
+GROUP BY DATE_FORMAT(dt, '%Y-%m')
+ORDER BY month;
+-----------------------------------------------------------------------------------------
+------- 12) Rankings: top 10 (make, model) by total revenue------------------------------
+SELECT make, model,
+       ROUND(SUM(sellingprice)) AS total_revenue,
+       RANK() OVER (ORDER BY SUM(sellingprice) DESC) AS revenue_rank
+FROM car_data
+WHERE sellingprice IS NOT NULL
+GROUP BY make, model
+limit 10
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
